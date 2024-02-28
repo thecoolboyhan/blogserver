@@ -3,10 +3,10 @@
 # Site wide configuration
 ####################################
 #
-title: zhujiajun
-email: zhujiajun.me@gmail.com
-description: zhujiajun's blog,powered by jekyll.
-url: https://zjiajun.github.io # the base hostname & protocol for your site
+title: thecoolboyhan
+email: hanyongfa2013@163.com
+description: hanyongfa's blog,powered by jekyll.
+url: https://thecoolboyhan.github.io # the base hostname & protocol for your site
 keywords: ["jekyll", "java", "scala","blog"]
 
 #
@@ -39,9 +39,9 @@ plugins:
 owner:
   name: zhujiajun
   avatar: avatar.jpg
-  job: "Java & Scala Developer"
+  job: "Java Developer"
   bio: "A backend developer who loves design awesome things. Working for Dianping at in Shanghai, China."
-  email: zhujiajun.me@gmail.com
+  email: hanyongfa2013@163.com
   disqus-shortname: #username
   twitter:  #username
   facebook: #username
@@ -52,7 +52,7 @@ owner:
     ad-client:
     ad-slot:
   bing-verify:
-  github: zjiajun #username
+  github: thecoolboyhan #username
   stackoverflow: #123456/username   from a "http://stackoverflow.com/users/123456/username" link
   linkedin: #username
   xing: #username
