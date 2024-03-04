@@ -7,7 +7,7 @@ title: thecoolboyhan
 email: hanyongfa2013@163.com
 description: hanyongfa's blog,powered by jekyll.
 url: https://thecoolboyhan.github.io # the base hostname & protocol for your site
-keywords: ["jekyll", "java", "scala","blog"]
+keywords: ["jekyll", "java", "scala","blog","周赛","算法"]
 
 #
 ###################################
@@ -37,10 +37,10 @@ plugins:
 ####################################
 #
 owner:
-  name: zhujiajun
+  name: hanyongfa
   avatar: avatar.jpg
   job: "Java Developer"
-  bio: "A backend developer who loves design awesome things. Working for Dianping at in Shanghai, China."
+  bio: "A backend developer at in Shanghai, China."
   email: hanyongfa2013@163.com
   disqus-shortname: #username
   twitter:  #username

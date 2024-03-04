@@ -3,3 +3,4 @@ This blog use [Jekyll](http://jekyllrb.com) and is based on theme [leonids](http
 
 模版来自#[zjiajun.github.io]([zhujiajun (zjiajun.github.io)](https://zjiajun.github.io/))
 
+使用：bundle exec jekyll b 编译
