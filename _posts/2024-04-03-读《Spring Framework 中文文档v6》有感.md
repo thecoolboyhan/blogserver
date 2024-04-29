@@ -41,6 +41,20 @@ IOC也被称为依赖注入（DI）。它是一个过程，对象仅通过构造
 
 
 
+## IOC容器概述
+
+
+
+org.springframework.context.ApplicationContext接口代表SpringIoC容器，负责实例化、配置和组装Bean。容器通过读取配置元素数据来获取关于要实例化、配置和组装哪些对象的指示。配置元素以XML、Java注解或Java代码表示。
+
+
+
+
+
+
+
+
+
 ## 使用容器
 
 ApplicationContext是一个高级工厂的接口，能够维护不同bean及其依赖关系的注册表。通过使用方法 T getBean（Stringname,Class<T> requiredType)，可以检索到bean的实例。
@@ -398,13 +412,11 @@ BeanFactory接口提供了一种高级配置机制，能够管理任何类型的
 
 
 
-## IOC容器概述
+### Bean定义（Definition）的继承
+
+一个Bean定义可以包含很多配置信息，包括构造函数参数、数据值和容器特有的信息，如初始化方法、静态工厂方法名称等等。一个子Bean定义从父定义继承配置数据。自定义可以覆盖一些值或根据需要添加其他值。使用父Bean定义和子Bean定义可以节省大量的打字工作量。
+
+> ApplicationContext默认设置了所有的Singleton。因此，如果你有一个（父）Bean定义，你打算作为模版使用，并且这个定义指定了一个类，你必须确保将abstract属性设置为true，否则应用上下文将试图预实例化abstract Bean。
 
 
-
-org.springframework.context.ApplicationContext接口代表SpringIoC容器，负责实例化、配置和组装Bean。容器通过读取配置元素数据来获取关于要实例化、配置和组装哪些对象的指示。配置元素以XML、Java注解或Java代码表示。
-
-
-
-- 基于注解的配置
 
