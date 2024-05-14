@@ -183,12 +183,124 @@ Online DDL操作的性能取决于是否发生了表的重建。在对大表执�
 
 
 
+## Online DDL原理
+
+主要原理是将数据分为基线和增量两部分，开启一个单独线程变更基线数据，同时增量实时记录到row-log里。基线变更结束后，通过回放row-log，实现增量同步。
+
+- 整个过程有几个关键点：
+
+1. 还是变更时获取快照，这个阶段需要禁写，确保获取snapshot对应的基线，后续增量（row-log）是一份完整的数据。
+2. 在基线变更完成后，开始回放row-log，由于row-log随着业务的写入在不断地追加，因此需要基于一个前提：row-log的回放速度高于业务写入的速度，否则可能一直追不上，schema变更就无法完成。
+3. schema生效阶段同样需要禁写，确保不会有新的写进来，新的schema开始生效。
+
+- instant ddl
+
+有点类似于X-DBFast DDL。其余和Online DDL的基本原理保持不变。对于MySQL的Online DDL方案，需要说明的是：MySQL主备副本之间通过binlog同步， 主的schema变更完成后，才会写binlog同步给备库，然后备库才开始做DDL。假设一个ddl变更需要1小时，那么备库最多可能会延迟2倍的变更时间。若变更期间，主库发生故障，备库数据还未追平，则无法提供服务的。
 
 
+## F1-Spanner架构的Online DDL
+
+每个server都是无状态的，多副本复制靠存储层Spanner保证。对于Spanner而言，F1-Server相当于一个客户端。数据库的schema通过Spanner持久化存储，每个F1-Server在本地维护一份schema的缓存，并通过lease机制保证缓存的时效性。任何一个F1-Server都可以接收读取请求，如果schema缓存不正确，就无法保证存取数据正确性。
+
+如为表Realation（PK，C1）新加索引index（C1）。首先选举一个F1-Server作为owner，记为F1-Server1，执行DDL后拥有了new-schema，同时假设F1-Server2仍然使用old-schema。
+
+对于某个记录，F1-Server1会同时写入主表和索引数据；如果该记录后续被F1-Server2删除，那么只会删除主表记录，索引数据就会残留在系统中，这就产生了不一致。
+
+- S1（absent）：变更前的状态
+- s2（delete-only）：只允许删除新二级索引，忽略新二级索引写入，不允许读新二级索引
+- s3（write-only）：当所有F1-Server都达到S2状态后，开始进入这一阶段，允许删除/写入新二级索引进kv层，不允许读新二级索引，并开始扫描基线数据，构造新的二级索引<key,value>到kv层。
+- s4（public):新二级索引对外可见（可读）
+
+F1论文详细论述了经过这4个状态的转变，如何保证一致性，过程较为复杂。
+
+![2024-5-1317:29:15-1715592555187.png](https://gitee.com/grsswh/drawing-bed/raw/master/image/2024-5-1317:29:15-1715592555187.png)
+
+## copy算法
+
+较简单的实现方法，MySQL 会建立一个新的临时表，把源表的所有数据写入到临时表，在此期间无法对源表进行数据写入。MySQL 在完成临时表的写入之后，用临时表替换掉源表。这个算法主要被早期（<=5.5）版本所使用。
+
+## inplance算法
+
+从5.6开始，常用的DDL都默认使用这个算法。inplace算法包含两类：inplace-no-rebuild和inplace-rebuild，两者的主要差异在于是否需要重建源表。
+
+- prepare阶段：
+
+1. 创建新的临时frm文件（与InnoDB无关）。
+2. 持有exclusive-MDL锁，禁止读写。
+3. 根据alter类型，确定执行方式（copy，Online-rebuild，Online-not-rebuild）。更新数据字典的内存对象。
+4. 分配row_log对象记录数据变更的增量（仅rebuild类型需要）。
+5. 生产新的临时ibd文件new_table（仅rebuild类型需要）。
+
+- execute阶段：
+
+1. 降级MDL锁，允许读写。
+2. 扫描old_table聚簇索引（主键）中的每条记录rec。
+3. 遍历new_table的聚簇索引和二级索引，逐一处理。根据rec构造对应的索引项。
+4. 将构造索引项插入sort_buffer块排序。将sort_buffer块更新到new_table的索引上。
+5. 记录Online-ddl执行过程中产生的增量（仅rebuild类型需要）。
+6. 重放row_log中的操作到new_table的索引上（not-rebuild数据是在原表上更新）。
+7. 重放row_log中的DML操作到new_table的数据行上。
+
+- commit阶段：
+
+1. 当前block为row_log最后一个时，禁止读写，升级到exclusive-MDL锁。
+2. 重做row_log中最后一部分增量。更新InnoDB的数据字典。
+3. 提交事务（刷事务的redo日志）。修改统计信息。
+4. rename临时Ibd文件，frm文件。
+5. 变更完成后，是否exclusive-MDL锁。
+
+## instant 算法
+
+MySQL 8.0.12 才提出的新算法，目前只支持添加列等少量操作，利用 8.0 新的表结构设计，可以直接修改表的 metadata 数据，省掉了 rebuild 的过程，极大的缩短了 DDL 语句的执行时间。
+
+
+
+
+
+## pt-online-schema-change
+
+借鉴了 copy 算法的思路，由外部工具来完成临时表的建立，数据同步，用临时表替换源表这三个步骤。其中数据同步是利用 MySQL 的触发器来实现的，会少量影响到线上业务的 QPS 及 SQL 响应时间。
+
+
+## MySQL 8.0特性 instant add column(快速加列）
+
+快速加列采用的算法是instant算法，使得添加列时不再需要rebuild整个表，只需要在表的metadata中记录新增列的基本信息即可。
+
+mysql8.0对表metadata结构做出了变更。8.0除了在表的metadata信息中新增了instant列的默认值以及非instant列的数量之外，还在数据的物理记录中加入了info_bit，包括一个flag来标记这条记录是否为添加instant列之外才更新、插入的，以及column_num，用来记录行数据总共有多少列。
+
+当使用instant算法来添加列的时候，无需rebuild表，直接把列的信息记录到metadata中即可，对这些行进行操作时，可以读取metadata的信息来组合出完整的行数据。
+
+- select：读取一行数据的物理记录时，会根据flag来判断是否需要去metadata中获取instant列的信息；如果需要，则根据column_num来读取实际的物理数据，再从metadata中补全缺少的instant列数据。
+- insert：额外记录语句执行时的flag和column_num
+- delete：与以前的版本保持一致
+- Update：如果表的instant column数量发生了变化，对旧数据的update会在内部转换成delete和insert操作。
+
+> 当对包含instant列的表进行rebuild时，所有数据在rebuild的过程中重新以旧的数据格式（包含所有列的内容）写入到表中，所以rebuild表之后，information_schema中有关这个表的instant的信息会被重置。
+
+### 默认使用instant算法的操作：
+
+1. 添加列
+> 不支持删除普通列
+2. 添加或删除一个虚拟列
+3. 添加或者删除一个列的默认值
+4. 修改enum或者set列的定义
+5. 变更索引的类型（B树、哈希）
+6. 使用alter语法重命名表
+
+
+### 使用限制
+
+- 如果alter语句包含了add column和其他操作，其中有操作不支持instant算法的，那么alter语句会报错，所有的操作都不会执行。
+- 添加列时，不能使用after关键字控制列的位置，只能添加在表的末尾（最后一列）。
+- 开启压缩的InnoDB表无法使用instant算法。
+- 不支持包含全文索引的表。
+- 仅支持使用mysql8.0新表空间格式的表。
+- 不支持临时表。
+- 包含instant列的表无法再旧版本的mysql上使用（即物理备份无法恢复）。
+- 在旧版本上，如果表或者表的索引已经corrupt，除非已经执行fix或者rebuild，否则升级到新版本后无法添加instant列。
 
 
 # 各版本支持的 Online DDL语句
-
 
 
 ![2024-5-1113:49:16-1715406556009.png](https://gitee.com/grsswh/drawing-bed/raw/master/image/2024-5-1113:49:16-1715406556009.png)
