@@ -420,3 +420,76 @@ BeanFactory接口提供了一种高级配置机制，能够管理任何类型的
 
 
 
+### 容器的扩展
+
+
+
+#### 使用BeanPostProcessor自定义bean
+
+> BeanPostProcessor接口定义了回调方法，可以实现这些方法来提供你自己的实例化逻辑、依赖性解析逻辑等。
+
+BeanPostProcessor实例对Bean（或对象）实例进行操作。也就是说，Spring Ioc容器实例化一个Bean实例，然后由BeanPostProcessor实例来完成其工作。
+
+BeanPostProcessor实例是按容器范围的。只有在你使用容器结构时才有意义。如果你在一个容器中定义了一个BeanPostProcessor，他只对该容器的bean进行后置处理。换句话说，在一个容器中定义的BeanPostProcessor不会对另一个容器中定义的BeanPostProcessor进行后置处理，即使两个容器都是同一层次结构的一部分。
+
+
+``` java
+package org.springframework.beans.factory.config;
+
+import org.springframework.beans.BeansException;
+import org.springframework.lang.Nullable;
+
+public interface BeanPostProcessor {
+    @Nullable
+    default Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        return bean;
+    }
+
+    @Nullable
+    default Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        return bean;
+    }
+}
+
+```
+BeanPostProcessor接口正常由两个回调方法组成。当这样的类被注册为容器的后置处理器时，对于容器创建的每个bean实例，后置处理器在容器初始化方法被调用之前和任何bean初始化回调之后都会从容器获得一个回调。后置处理程序可以对Bean实例采取任何行动，包括完全忽略回调。bean类后置处理器通常会检查回调接口，或者用代理来包装bean类。一些Spring AOP基础设施类被实现为Bean后置处理器，以提供代理封装逻辑。
+
+ApplicationContext会自动检测在配置元数据中定义实现BeanPostProcessor 接口的任何Bean。ApplicationContext将这些bean注册为后置处理器，以便以后在bean创建时可以回调它们。Bean后置处理器可以像其他Bean一样被部署在容器中。
+
+> 以编程方式注册BeanPostProcessor实例
+>
+> 虽然推荐的BeanPostProcessor 虽然推荐的 BeanPostProcessor 注册方法是通过 ApplicationContext 自动检测（如前所述），但你可以通过使用 addBeanPostProcessor 方法，针对 ConfigurableBeanFactory 以编程方式注册它们。
+> 以编程方式添加的BeanPostProcessor实例并不遵循Order接口的顺序来执行。 
+
+- BeanPostProcessor实例和AOP自动代理
+
+实现了BeanPostProcessor接口的类是特殊的，会被容器区别对待。所有BeanPostProcessor实例和他们直接引用的Bean在启动时被实例化，作为ApplicationContext特殊启动阶段的一部分。接下来，所有BeanPostProcessor实例被分类注册，并应用于容器中的所有其他Bean。因为AOP的自动代理是作为BeanPostProcessor本身实现的，所以BeanPostProcessor实例和它们直接引用的Bean都不符合自动代理的条件，因此，没有切面被织入进去。    
+
+#### 用BeanFactoryPostProcessor定制配置元数据
+
+BeanFactoryPostProcessor对Bean配置元数据进行操作。Spring IoC容器让BeanFactoryPostProcessor读取配置元数据，并在容器实例化BeanFactoryPostProcessor实例以外的任何Bean之前对其进行潜在的修改。
+
+``` java
+package org.springframework.beans.factory.config;
+
+import org.springframework.beans.BeansException;
+
+@FunctionalInterface
+public interface BeanFactoryPostProcessor {
+    void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException;
+}
+
+
+```
+
+
+> 如果你想改变实际的Bean实例（即从配置元数据中创建的对象），那么你需要使用 BeanPostProcessor（如前面 使用 BeanPostProcessor 自定义 Bean 中的描述）。虽然在技术上可以在BeanFactoryPostProcessor中处理Bean实例（例如，通过使用BeanFactory.getBean())，但这样做会导致过早的Bean实例化，违反了标准容器的生命周期。这可能会导致负面的副作用，比如绕过Bean的后置处理器。
+
+
+## 基于注解的容器配置
+
+### 使用@Autowired
+
+> @Inject注解可以代替Spring的@Autowired注解
+
+从Springframework 4.3开始，如果目标Bean一开始就只定义了一个构造函数，那么在这样的构造函数上就不再需要@Autowired注解。然而，如果有几个构造函数，而且没有主要/默认构造函数，那么至少有一个构造函数必须用@Autowired注解，以便指示容器使用哪一个。
