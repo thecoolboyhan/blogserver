@@ -493,3 +493,217 @@ public interface BeanFactoryPostProcessor {
 > @Inject注解可以代替Spring的@Autowired注解
 
 从Springframework 4.3开始，如果目标Bean一开始就只定义了一个构造函数，那么在这样的构造函数上就不再需要@Autowired注解。然而，如果有几个构造函数，而且没有主要/默认构造函数，那么至少有一个构造函数必须用@Autowired注解，以便指示容器使用哪一个。
+
+
+> @Autowired、@Inject、@Value和@Resource注解是由Spring BeanPostProcessor实现处理的。这意味着你不能在你自己的BeanPostProcessor或BeanFactoryPostProcessor类型（如果有的话）中应用这些注解。这些类型必须通过使用XML或Spring @Bean方法明确地“注入”。
+
+### 用@Primary对基于注解的自动注入进行微调
+
+因为按照类型自动注入可能会导致多个候选者，所以经常需要对选择过程进行更多的控制。实现这一目标的方法之一是使用Spring 的@Primary注解。
+
+- Primary
+> 当多个Bean是自动注入到一个单值（single value）依赖的候选者时，应该优先考虑一个特定的Bean。如果在候选者中正好有一个主要（Primary）Bean存在，他就会成为自动注入的值。
+
+``` java
+@Configuration
+public class MovieConfiguration {
+
+    @Bean
+    @Primary
+    public MovieCatalog firstMovieCatalog() { ... }
+
+    @Bean
+    public MovieCatalog secondMovieCatalog() { ... }
+
+    // ...
+}
+
+```
+
+
+``` java
+public class MovieRecommender {
+
+    @Autowired
+    private MovieCatalog movieCatalog;
+
+    // ...
+}
+
+
+```
+
+### 用Qualifiers微调基于注解的自动注入
+
+有几个实例，当可以确定一个主要的候选者时，@Primary是按照类型自动装配的一种有效方式。当你需要对选择过程进行更多控制时，你可以使用Spring 的@Qualefier注解。将限定符的值与特定的参数联系起来，缩小类型匹配的范围，从而为每个参数选择一个特定的bean。
+
+``` java
+public class MovieRecommender{
+    
+    @Autowired
+    @Qualifier("main")
+    private MovieCatalog movieCatalog;
+    //...
+}
+```
+
+> 在类型匹配候选者中，让Qualifiers针对目标bean名称进行选择，不需要在注入点上进行@Qualifiers注解。如果没有其他解析指标（如果Qualifiers或primary标记），对于非唯一的依赖情况，Spring会将注入点名称（即字段名或参数名）与目标Bean名称进行匹配，并选择同名的候选者（如果有）。
+
+
+
+- Autowired
+
+适用于字段、构造函数和参数方法，允许在参数级别上通过Qualifier注解来缩小范围。
+
+
+- Resource
+
+只支持字段和只有一个参数的bean属性setter方法。
+
+
+如果你的注入目标是构造函数或参数方法，你应该坚持使用Qualifier。
+
+
+### 用@Resource注入
+
+Spring还支持通过在字段或bean属性设置上使用@Resource注解进行注入。
+@Resource需要一个name属性。默认情况下，spring将该值解释为要注入的bean名称。
+
+``` java
+public class SimpleMovieLister{
+
+    private MovieFinder movieFinder;
+
+    @Resource(name="myMovieFinder")
+    public void setMovieFinder(MovieFinder movieFinder){
+        this.movieFinder=moviedFinder;
+    }
+}
+
+```
+
+如果没有明确指定名字，默认的名字来源于字段名或setter方法。如果是一个字段，采用字段名。如果是setter方法，则采用Bean的属性名。
+
+在没有明确指定名称的@Resource使用的特殊情况下，与@Autowired类似，@Resource会找到一个主要的类型匹配，而不是一个特定的命名的Bean。
+
+
+### 使用@Value
+
+@Value通常用于注入外部化properties。
+
+``` java
+@Component
+public class MovieRecommender{
+    
+    private final String catalog;
+
+    public MovieRecommender(@Value("${catalog.name}") String catalog){
+        this.catalog=catalog;
+    }
+}
+
+```
+
+### 使用@PostConstruct和@PreDestroy
+
+初始化回调和销毁回调。
+携带了上面注解之一的方法会在生命周期与相应的Spring生命周期接口方法或明确声明的回调方法在同一时间被调用。
+
+> 缓存在初始化时被预先填充，在销毁时被清除。
+
+``` java
+public class CachingMovieLister{
+    
+    @PostConstruct
+    public void populateMovieCache(){
+        
+    }
+ 
+    @PreDestroy
+    public void clearMovieCache(){
+
+    }
+}
+```
+
+
+
+### Spring组件模型元素和jsr标准的比较
+
+
+
+| Spring              | **jakarta.inject.\*** | jakarta.inject 限制 / 说明                                   |
+| ------------------- | --------------------- | ------------------------------------------------------------ |
+| @Autowired          | @Inject               | @Inject没有‘required’属性。可以用java 8的Optional来代替。    |
+| @Component          | @Name/@ManagedBean    | jsr-330没有提供一个可组合的模型，只是提供了一个识别命名组件的方法 |
+| @Scope("singleton") | @Singleton            | JSR-330 默认scope就像Spring的prototype。然而，为了与Spring的一般默认值保持一致，在Spring容器中声明的JSR-330Bean 默认是一个Singleton。为了使用Singleton以外的scope，你应该使用Spring的@scope注解。 |
+| @Qualifier          | @Qualifier/@Named     | jakarta.inject.Qualifier只是一个用于构建自定义Qualifier的元注解。具体的String Qualifier（像Spring 的@Qualifier一样有一个值）可以通过`jakarta.inject.Named` 来关联。 |
+| @Value              | -                     | 没有                                                         |
+| @Lazy               | -                     | 没有                                                         |
+| ObjectFactory       | provider              | jakarta.inject.Provider 是Spring的ObjectFactory的直接代替品，只是get()方法的名字比较短。它也可以与Spring的@Autowired结合使用，或者与非注解的构造器和setter方法结合使用。 |
+
+
+## 基于java的容器配置
+
+
+
+### 基本概念：@Bean和@Configuration
+
+Spring的java配置支持的核心工件是@Configuration注解的类和@Bean注解的方法。
+
+@Bean注解用来表示一个方法实例化、配置和初始化了一个新的对象。由Spring IoC容器管理。@Bean注解的作用与<bean/>元素的作用相同。你可以在任何Spring @Component中使用@Bean注解的方法。
+
+@Configuration用来注解一个类。表名它的主要目的是作为bean定义的来源。此外，@Configuration类允许通过调用同一个类中的其他@Bean方法来定义Bean间的依赖关系。
+
+``` java
+@Configuration
+public class AppConfig{
+    
+    @Bean
+    public MyServiceImpl myService(){
+        return new MySerivceImpl();
+    }
+}
+```
+
+
+### 通过使用AnnotationConfigApplicationContext实例化Spring容器
+
+> 在Spring 3.0中引入。能够接受@Configuration类、普通的@Component类和用JSR元数据注解的类。
+
+``` java
+public static void main(String[] args){
+    ApplicationContext ctx=new AnnotationConfigApplicationContext(AppConfig.class);
+    MyService myService =ctx.getBean(MyService.class);
+    myService.doStuff();
+}
+
+```
+
+可以使用无参构造来实例化AnnotationConfigApplicationContext，然后通过register（）方法来配置它。
+
+``` java
+public class TestAnnotationConfigApplicationContext {
+    public static void main(String[] args) {
+        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+        ctx.register(MyService1.class);
+        ctx.refresh();
+        MyService1 myService1 = ctx.getBean(MyService1.class);
+        myService1.doStuff();
+    }
+}
+```
+
+@Configuration类是用@Component元注解的，所以他们是组件扫描的候选者。假设AppConfig在com.acme包中声明的，在调用scan（）是会被选中。在refresh（）时，它的所有@Bean方法都会被处理并注册为容器中的bean定义。
+
+
+
+### 使用@Bean注解
+
+> @Bean是一个方法级注解，是XML<bean/>元素的直接类似物。
+可以在@Configuration或@Component注解的类中使用@Bean注解。
+
+
+默认情况下，用java配置定义的具有public 的close或shutdown方法的Bean会自动被列入销毁回调。如果你有一个public的close或shutdown方法，并且你不希望它在容器被关闭时被调用，可以在bean定义中添加@Bean(destroyMethod="")来禁用默认(inferred)模式。
+
+
